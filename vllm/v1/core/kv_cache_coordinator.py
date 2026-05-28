@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from math import lcm
 from typing import NamedTuple
 
 from vllm.v1.core.block_pool import BlockPool
@@ -21,6 +22,7 @@ from vllm.v1.kv_cache_interface import (
     FullAttentionSpec,
     KVCacheConfig,
     KVCacheSpec,
+    MambaSpec,
 )
 from vllm.v1.request import Request
 
@@ -273,6 +275,7 @@ class KVCacheCoordinator(ABC):
         self,
         block_hashes: list[BlockHash],
         max_cache_hit_length: int,
+        skip_mamba_align: bool = False,
     ) -> tuple[tuple[list[KVCacheBlock], ...], int, int]:
         pass
 
@@ -325,6 +328,7 @@ class KVCacheCoordinatorNoPrefixCache(KVCacheCoordinator):
         self,
         block_hashes: list[BlockHash],
         max_cache_hit_length: int,
+        skip_mamba_align: bool = False,
     ) -> tuple[tuple[list[KVCacheBlock], ...], int, int]:
         blocks: tuple[list[KVCacheBlock], ...] = tuple(
             [] for _ in range(self.num_single_type_manager)
@@ -389,6 +393,7 @@ class UnitaryKVCacheCoordinator(KVCacheCoordinator):
         self,
         block_hashes: list[BlockHash],
         max_cache_hit_length: int,
+        skip_mamba_align: bool = False,
     ) -> tuple[tuple[list[KVCacheBlock], ...], int, int]:
         hit_blocks = self.single_type_managers[0].find_longest_cache_hit(
             block_hashes=block_hashes,
@@ -507,6 +512,31 @@ class HybridKVCacheCoordinator(KVCacheCoordinator):
                 for gid in group.group_ids:
                     self.single_type_managers[gid].use_eagle = True
 
+        # The LCM of the block sizes of all attention types.
+        # The cache hit length must be a multiple of the LCM of the block sizes
+        # to make sure the cache hit length is a multiple of the block size of
+        # each attention type. Requiring this because we don't support partial
+        # block cache hit yet.
+        block_sizes = [spec.block_size for spec, _, _, _ in self.attention_groups]
+        self.lcm_block_size = lcm(*block_sizes)
+
+        non_mamba_sizes = [
+            s.block_size
+            for s, _, _, _ in self.attention_groups
+            if not isinstance(s, MambaSpec)
+        ]
+        self.non_mamba_lcm_block_size: int = (
+            lcm(*non_mamba_sizes) if non_mamba_sizes else self.lcm_block_size
+        )
+
+        # Attention-group indices (into ``self.attention_groups``) that
+        # contain at least one EAGLE/MTP KV cache group.
+        self.eagle_attn_group_indices: set[int] = {
+            i
+            for i, (_, group_ids, _, _) in enumerate(self.attention_groups)
+            if any(gid in self.eagle_group_ids for gid in group_ids)
+        }
+
     def cache_blocks(self, request: Request, num_computed_tokens: int) -> None:
         # Cache hits in this coordinator are always a multiple of
         # ``scheduler_block_size`` tokens (see ``find_longest_cache_hit``).
@@ -533,6 +563,7 @@ class HybridKVCacheCoordinator(KVCacheCoordinator):
         self,
         block_hashes: list[BlockHash],
         max_cache_hit_length: int,
+        skip_mamba_align: bool = False,
     ) -> tuple[tuple[list[KVCacheBlock], ...], int, int]:
         """
         Find the longest cache hit using an iterative fixed-point algorithm.
@@ -575,12 +606,20 @@ class HybridKVCacheCoordinator(KVCacheCoordinator):
         # per candidate length (see issue #32802).
         eagle_verified: set[int] = set()
 
+        alignment_tokens = (
+            self.non_mamba_lcm_block_size if skip_mamba_align else self.lcm_block_size
+        )
+
         while True:
             curr_hit_length = hit_length
 
             for idx, (spec, group_ids, manager_cls, use_eagle) in enumerate(
                 self.attention_groups
             ):
+                if skip_mamba_align and isinstance(spec, MambaSpec):
+                    for gid in group_ids:
+                        hit_blocks_by_group[gid] = []
+                    continue
                 cached_blocks = hit_blocks_by_group[group_ids[0]]
                 if isinstance(spec, FullAttentionSpec) and cached_blocks is not None:
                     # Full attention is downward-closed: we only need to look
@@ -606,7 +645,7 @@ class HybridKVCacheCoordinator(KVCacheCoordinator):
                     block_pool=self.block_pool,
                     kv_cache_spec=spec,
                     drop_eagle_block=drop_eagle_block,
-                    alignment_tokens=self.scheduler_block_size,
+                    alignment_tokens=alignment_tokens,
                 )
                 _new_hit_length = len(hit_blocks[0]) * spec.block_size
                 if drop_eagle_block:
