@@ -288,9 +288,6 @@ class Scheduler(SchedulerInterface):
         num_new_local_computed_tokens: int = 0,
         num_external_computed_tokens: int = 0,
     ) -> int:
-        assert num_external_computed_tokens == 0, (
-            "External KV connector is not verified yet"
-        )
         num_computed_tokens = (
             request.num_computed_tokens
             + num_new_local_computed_tokens
