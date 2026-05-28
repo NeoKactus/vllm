@@ -246,11 +246,18 @@ class SimpleCPUOffloadScheduler:
         max_hit_len = request.num_tokens - 1 - num_computed_tokens
         if max_hit_len <= 0:
             return 0, False
+        cpu_skip_mamba = bool(
+            request.kv_transfer_params
+            and request.kv_transfer_params.get("do_remote_prefill", False)
+        )
         cpu_hit_blocks, hit_length = self.cpu_coordinator.find_longest_cache_hit(
-            remaining_hashes, max_hit_len
+            remaining_hashes, max_hit_len, cpu_skip_mamba
         )
 
         if hit_length > 0:
+            if request.kv_transfer_params is None:
+                request.kv_transfer_params = {}
+            request.kv_transfer_params["do_remote_prefill"] = True
             pin_blocks = [
                 blk for grp in cpu_hit_blocks for blk in grp if not blk.is_null
             ]
