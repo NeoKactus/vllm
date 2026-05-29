@@ -109,6 +109,25 @@ class UsageInfo(OpenAIBaseModel):
     prompt_tokens_details: PromptTokenUsageInfo | None = None
 
 
+class Timings(OpenAIBaseModel):
+    """Timing statistics for a request, in llama-server compatible format."""
+
+    prompt_n: int = 0
+    """Number of prompt tokens processed (excluding cached)."""
+    predicted_n: int = 0
+    """Number of output tokens generated."""
+    prompt_per_second: float = 0.0
+    """Prompt processing speed in tokens per second."""
+    predicted_per_second: float = 0.0
+    """Generation speed in tokens per second."""
+    prompt_ms: float = 0.0
+    """Time spent processing the prompt in milliseconds."""
+    predicted_ms: float = 0.0
+    """Time spent generating output tokens in milliseconds."""
+    cache_n: int = 0
+    """Number of tokens served from cache."""
+
+
 class RequestResponseMetadata(BaseModel):
     request_id: str
     final_usage_info: UsageInfo | None = None

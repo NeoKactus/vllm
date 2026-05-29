@@ -47,6 +47,7 @@ from vllm.entrypoints.openai.engine.protocol import (
     FunctionCall,
     PromptTokenUsageInfo,
     RequestResponseMetadata,
+    Timings,
     ToolCall,
     UsageInfo,
 )
@@ -101,6 +102,7 @@ class OpenAIServingChat(OpenAIServing):
         tool_parser: str | None = None,
         enable_prompt_tokens_details: bool = False,
         enable_force_include_usage: bool = False,
+        enable_timings: bool = False,
         enable_log_outputs: bool = False,
         enable_log_deltas: bool = True,
         default_chat_template_kwargs: dict[str, Any] | None = None,
@@ -150,6 +152,7 @@ class OpenAIServingChat(OpenAIServing):
 
         self.enable_prompt_tokens_details = enable_prompt_tokens_details
         self.enable_force_include_usage = enable_force_include_usage
+        self.enable_timings = enable_timings
         self.default_sampling_params = self.model_config.get_diff_sampling_param()
         mc = self.model_config
         self.override_max_tokens = (
@@ -184,6 +187,39 @@ class OpenAIServingChat(OpenAIServing):
                 chat_template_content_format=self.chat_template_content_format,
                 chat_template_kwargs=self.default_chat_template_kwargs,
             )
+        )
+
+    def _build_timings(
+        self, final_res: RequestOutput, num_prompt_tokens: int
+    ) -> Timings | None:
+        if not self.enable_timings:
+            return None
+        stats = final_res.metrics
+        if stats is None:
+            return None
+        if stats.scheduled_ts == 0.0 or stats.first_token_ts == 0.0:
+            return None
+        prompt_ms = (stats.first_token_ts - stats.scheduled_ts) * 1000.0
+        predicted_ms = (stats.last_token_ts - stats.first_token_ts) * 1000.0
+        if prompt_ms < 0:
+            prompt_ms = 0.0
+        if predicted_ms < 0:
+            predicted_ms = 0.0
+        num_cached = final_res.num_cached_tokens or 0
+        prompt_n = max(num_prompt_tokens - num_cached, 0)
+        predicted_n = sum(len(o.token_ids) for o in final_res.outputs)
+        prompt_per_second = prompt_n / (prompt_ms / 1000.0) if prompt_ms > 0 else 0.0
+        predicted_per_second = (
+            predicted_n / (predicted_ms / 1000.0) if predicted_ms > 0 else 0.0
+        )
+        return Timings(
+            prompt_n=prompt_n,
+            predicted_n=predicted_n,
+            prompt_per_second=prompt_per_second,
+            predicted_per_second=predicted_per_second,
+            prompt_ms=prompt_ms,
+            predicted_ms=predicted_ms,
+            cache_n=num_cached,
         )
 
     def _effective_chat_template_kwargs(
@@ -954,6 +990,8 @@ class OpenAIServingChat(OpenAIServing):
                         cached_tokens=num_cached_tokens
                     )
 
+                stream_timings = self._build_timings(res, num_prompt_tokens)
+
                 final_usage_chunk = ChatCompletionStreamResponse(
                     id=request_id,
                     object=chunk_object_type,
@@ -961,6 +999,7 @@ class OpenAIServingChat(OpenAIServing):
                     choices=[],
                     model=model_name,
                     usage=final_usage,
+                    timings=stream_timings,
                     system_fingerprint=self.system_fingerprint,
                 )
                 final_usage_data = final_usage_chunk.model_dump_json(
@@ -1391,12 +1430,15 @@ class OpenAIServingChat(OpenAIServing):
         # ``final_res.prompt`` is the rendered chat-templated prompt text
         prompt_text = final_res.prompt if request.return_prompt_text else None
 
+        timings = self._build_timings(final_res, num_prompt_tokens)
+
         response = ChatCompletionResponse(
             id=request_id,
             created=created_time,
             model=model_name,
             choices=choices,
             usage=usage,
+            timings=timings,
             system_fingerprint=self.system_fingerprint,
             prompt_logprobs=clamp_prompt_logprobs(final_res.prompt_logprobs),
             prompt_token_ids=(
