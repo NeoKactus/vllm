@@ -199,7 +199,7 @@ class OpenAIServingChat(OpenAIServing):
             predicted_ms = 0.0
         num_cached = final_res.num_cached_tokens or 0
         prompt_n = max(num_prompt_tokens - num_cached, 0)
-        predicted_n = sum(len(o.token_ids) for o in final_res.outputs)
+        predicted_n = stats.num_generation_tokens
         prompt_per_second = prompt_n / (prompt_ms / 1000.0) if prompt_ms > 0 else 0.0
         predicted_per_second = (
             predicted_n / (predicted_ms / 1000.0) if predicted_ms > 0 else 0.0
