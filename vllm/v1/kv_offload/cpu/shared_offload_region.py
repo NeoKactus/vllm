@@ -89,14 +89,26 @@ class SharedOffloadRegion:
             worker_offset = rank * cpu_page_size
             _t0 = time.perf_counter()
             page_size = self.page_size
+            madvise_failed = False
             for block in range(num_blocks):
                 raw_offset = block * self._row_stride + worker_offset
                 aligned_offset = (raw_offset // page_size) * page_size
                 end = raw_offset + cpu_page_size
                 aligned_length = end - aligned_offset
-                self.mmap_obj.madvise(
-                    _MADV_POPULATE_WRITE, aligned_offset, aligned_length
-                )
+                try:
+                    self.mmap_obj.madvise(
+                        _MADV_POPULATE_WRITE, aligned_offset, aligned_length
+                    )
+                except OSError as e:
+                    if not madvise_failed:
+                        logger.warning(
+                            "MADV_POPULATE_WRITE failed on block %d: %s. "
+                            "Pages will be faulted in on first access.",
+                            block,
+                            e,
+                        )
+                        madvise_failed = True
+                    continue
             logger.debug(
                 "MADV_POPULATE_WRITE loop: %d blocks in %.3f s",
                 num_blocks,
@@ -105,7 +117,14 @@ class SharedOffloadRegion:
         else:
             # No rank — populate the entire shared region in one call.
             _t0 = time.perf_counter()
-            self.mmap_obj.madvise(_MADV_POPULATE_WRITE, 0, self.total_size_bytes)
+            try:
+                self.mmap_obj.madvise(_MADV_POPULATE_WRITE, 0, self.total_size_bytes)
+            except OSError as e:
+                logger.warning(
+                    "MADV_POPULATE_WRITE failed for entire region: %s. "
+                    "Pages will be faulted in on first access.",
+                    e,
+                )
             logger.debug(
                 "MADV_POPULATE_WRITE entire region: %.3f s", time.perf_counter() - _t0
             )
