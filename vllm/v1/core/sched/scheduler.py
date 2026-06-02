@@ -679,6 +679,7 @@ class Scheduler(SchedulerInterface):
                     new_computed_blocks = self.kv_cache_manager.empty_kv_cache_blocks
                     num_new_local_computed_tokens = 0
                     num_computed_tokens = request.num_computed_tokens
+                    num_uncached_common_prefix_tokens = 0
 
                 encoder_inputs_to_schedule = None
                 external_load_encoder_input = []
