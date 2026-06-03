@@ -122,7 +122,10 @@ class SimpleCPUOffloadScheduler:
             max_num_batched_tokens=(
                 vllm_config.scheduler_config.max_num_batched_tokens
             ),
-            use_eagle=False,
+            use_eagle=(
+                vllm_config.speculative_config is not None
+                and vllm_config.speculative_config.use_eagle()
+            ),
             enable_caching=True,
             enable_kv_cache_events=self.enable_kv_cache_events,
             dcp_world_size=dcp_world_size,
