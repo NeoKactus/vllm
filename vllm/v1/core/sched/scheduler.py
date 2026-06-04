@@ -698,7 +698,6 @@ class Scheduler(SchedulerInterface):
 
                 if load_kv_async:
                     # KVTransfer: loading remote KV, do not allocate for new work.
-                    assert num_external_computed_tokens > 0
                     num_new_tokens = 0
                 else:
                     # Number of tokens to be scheduled.
