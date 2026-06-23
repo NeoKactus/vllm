@@ -219,6 +219,10 @@ class RequestStateStats:
     # Track if this request is corrupted (NaNs in logits)
     is_corrupted: bool = False
 
+    # Speculative decoding stats
+    num_draft_tokens: int = 0
+    num_accepted_tokens: int = 0
+
 
 @dataclass
 class FinishedRequestStats:
@@ -371,6 +375,12 @@ class IterationStats:
             req_stats.first_token_latency = first_token_latency
 
         req_stats.num_generation_tokens += num_new_generation_tokens
+
+        # Accumulate speculative decoding stats
+        if output.num_draft_tokens is not None:
+            req_stats.num_draft_tokens += output.num_draft_tokens
+        if output.num_accepted_tokens is not None:
+            req_stats.num_accepted_tokens += output.num_accepted_tokens
 
         # Track if this request is corrupted (only check once per request)
         # Early exit if already marked as corrupted to avoid redundant checks

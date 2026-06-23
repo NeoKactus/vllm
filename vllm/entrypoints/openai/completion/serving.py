@@ -107,6 +107,10 @@ class OpenAIServingCompletion(OpenAIServing):
         predicted_per_second = (
             predicted_n / (predicted_ms / 1000.0) if predicted_ms > 0 else 0.0
         )
+        draft_n = stats.num_draft_tokens if stats.num_draft_tokens > 0 else None
+        draft_n_accepted = (
+            stats.num_accepted_tokens if stats.num_accepted_tokens > 0 else None
+        )
         return Timings(
             prompt_n=prompt_n,
             predicted_n=predicted_n,
@@ -115,6 +119,8 @@ class OpenAIServingCompletion(OpenAIServing):
             prompt_ms=prompt_ms,
             predicted_ms=predicted_ms,
             cache_n=num_cached,
+            draft_n=draft_n,
+            draft_n_accepted=draft_n_accepted,
         )
 
     async def render_completion_request(
