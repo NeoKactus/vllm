@@ -132,6 +132,10 @@ class Timings(OpenAIBaseModel):
     """Time spent generating output tokens in milliseconds."""
     cache_n: int = 0
     """Number of tokens served from cache."""
+    draft_n: int | None = None
+    """Total number of draft tokens proposed (only present when > 0)."""
+    draft_n_accepted: int | None = None
+    """Number of draft tokens accepted (only present when > 0)."""
 
 
 class RequestResponseMetadata(BaseModel):

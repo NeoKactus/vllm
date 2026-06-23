@@ -1569,6 +1569,8 @@ class Scheduler(SchedulerInterface):
                 sampled_token_ids[req_index] if sampled_token_ids else []
             )
 
+            num_draft_tokens: int | None = None
+            num_accepted: int | None = None
             scheduled_spec_token_ids = (
                 scheduler_output.scheduled_spec_decode_tokens.get(req_id)
             )
@@ -1726,6 +1728,8 @@ class Scheduler(SchedulerInterface):
                         trace_headers=request.trace_headers,
                         routed_experts=routed_experts,
                         num_nans_in_logits=request.num_nans_in_logits,
+                        num_draft_tokens=num_draft_tokens,
+                        num_accepted_tokens=num_accepted,
                     )
                 )
             else:
